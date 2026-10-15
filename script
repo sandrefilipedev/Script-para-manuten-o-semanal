@@ -1,0 +1,79 @@
+@echo off
+setlocal enabledelayedexpansion
+
+REM --- Configurações de log
+set LOGFILE=%~dp0manutencao_log_%DATE:~6,4%-%DATE:~3,2%-%DATE:~0,2%.txt
+echo Manutencao iniciada em %DATE% %TIME% > "%LOGFILE%"
+
+REM --- Definir caminhos de perfis de navegadores para proteger
+set EDGE_PROFILE=%LOCALAPPDATA%\Microsoft\Edge\User Data
+set CHROME_PROFILE=%LOCALAPPDATA%\Google\Chrome\User Data
+set FIREFOX_PROFILE=%APPDATA%\Mozilla\Firefox\Profiles
+
+echo Protegendo perfis de navegadores: >> "%LOGFILE%"
+echo Edge: %EDGE_PROFILE% >> "%LOGFILE%"
+echo Chrome: %CHROME_PROFILE% >> "%LOGFILE%"
+echo Firefox: %FIREFOX_PROFILE% >> "%LOGFILE%"
+
+REM --- 1) Limpar arquivos temporarios do usuario (sem tocar perfis de navegador)
+echo Limpando pasta TEMP do usuario... >> "%LOGFILE%"
+echo Deletando arquivos temporarios...
+REM Antes de deletar, checar se %TEMP% está dentro de algum perfil de navegador (proteção extra)
+set TEMP_LOWER=%TEMP:~0,1%%TEMP:~1%
+echo %TEMP% | findstr /I /C:"%EDGE_PROFILE%" /C:"%CHROME_PROFILE%" /C:"%FIREFOX_PROFILE%" >nul
+if %ERRORLEVEL%==0 (
+    echo AVISO: %TEMP% parece estar dentro de um perfil de navegador. Pulando limpeza de %TEMP% por seguranca. >> "%LOGFILE%"
+    echo Pulando limpeza de %TEMP% porque coincide com perfil de navegador. >> "%LOGFILE%"
+) else (
+    del /q/f/s "%TEMP%\*" >> "%LOGFILE%" 2>&1
+    rd /s /q "%TEMP%" >> "%LOGFILE%" 2>&1
+    mkdir "%TEMP%" >> "%LOGFILE%" 2>&1
+    echo OK >> "%LOGFILE%"
+)
+
+REM --- 2) Executar Disk Cleanup configurado (opcional)
+REM Nota: Disk Cleanup nao remove senhas de navegadores, mas se voce preferir, comente a linha abaixo.
+echo Executando Disk Cleanup (sagerun:1)... >> "%LOGFILE%"
+cleanmgr /sagerun:1 >> "%LOGFILE%" 2>&1
+
+REM --- 3) Limpar cache DNS
+echo Limpando cache DNS... >> "%LOGFILE%"
+ipconfig /flushdns >> "%LOGFILE%" 2>&1
+echo OK >> "%LOGFILE%"
+
+REM --- 4) Reset Winsock (requer reinicio para completar)
+echo Resetando Winsock (pode requerer reinicio)... >> "%LOGFILE%"
+netsh winsock reset >> "%LOGFILE%" 2>&1
+
+REM --- 5) Verificar arquivos do sistema (SFC) - pode demorar
+echo Iniciando SFC /scannow (pode demorar)... >> "%LOGFILE%"
+sfc /scannow >> "%LOGFILE%" 2>&1
+echo SFC concluido. >> "%LOGFILE%"
+
+REM --- 6) Reparar imagem do Windows (DISM) - opcional, recomendado se SFC falhar
+echo Executando DISM /RestoreHealth (pode demorar)... >> "%LOGFILE%"
+DISM /Online /Cleanup-Image /RestoreHealth >> "%LOGFILE%" 2>&1
+echo DISM concluido. >> "%LOGFILE%"
+
+REM --- 7) Otimizar SSD (TRIM)
+echo Executando TRIM no drive C: >> "%LOGFILE%"
+powershell -Command "Optimize-Volume -DriveLetter C -ReTrim -Verbose" >> "%LOGFILE%" 2>&1
+echo TRIM concluido. >> "%LOGFILE%"
+
+REM --- 8) Listar top 10 processos por uso de memoria (registro)
+echo Top 10 processos por uso de memoria: >> "%LOGFILE%"
+powershell -Command "Get-Process | Sort-Object -Descending WS | Select-Object -First 10 Name,Id,@{Name='MemoryMB';Expression={[math]::Round($_.WS/1MB,2)}} | Format-Table -AutoSize" >> "%LOGFILE%" 2>&1
+
+REM --- 9) Verificacao rapida de espaco livre no disco C:
+echo Espaco livre em C: >> "%LOGFILE%"
+wmic logicaldisk where "DeviceID='C:'" get Size,FreeSpace /format:list >> "%LOGFILE%" 2>&1
+
+REM --- Finalizacao
+echo Manutencao finalizada em %DATE% %TIME% >> "%LOGFILE%"
+echo.
+echo Manutencao concluida. Log salvo em: %LOGFILE%
+echo Observacoes:
+echo - Este script evita apagar perfis de navegadores (Chrome/Edge/Firefox) e nao altera o Gerenciador de Credenciais do Windows.
+echo - Se o Winsock foi resetado, reinicie o computador para aplicar.
+pause
+endlocal
